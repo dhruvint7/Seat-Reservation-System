@@ -2,6 +2,7 @@ package com.paytm.reservation.controller;
 
 import com.paytm.reservation.dto.CreateShowRequest;
 import com.paytm.reservation.dto.CreateShowResponse;
+import com.paytm.reservation.dto.ShowDetailsResponse;
 import com.paytm.reservation.service.ShowService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -23,5 +24,9 @@ public class ShowController {
             @Valid @RequestBody CreateShowRequest request
     ) {
         return showService.createShow(request);
+    }
+    @GetMapping("/{showId}")
+    public ShowDetailsResponse getShow(@PathVariable Long showId) {
+        return showService.getShow(showId);
     }
 }
