@@ -1,0 +1,16 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: seat-reservation-mysql
+    environment:
+      MYSQL_DATABASE: seat_reservation
+      MYSQL_USER: reservation
+      MYSQL_PASSWORD: reservation
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mysql_data:
