@@ -7,5 +7,6 @@
             https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <include file="db/changelog/changes/001-create-shows-and-seats.xml"/>
+    <include file="db/changelog/changes/002-create-reservation-tables.xml"/>
 
 </databaseChangeLog>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="
+            http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="002-create-reservations" author="dhruvin">
+
+        <createTable tableName="reservations">
+
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true"
+                             nullable="false"/>
+            </column>
+
+            <column name="show_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="user_id" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="amount_paise" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="status" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at" type="TIMESTAMP"
+                    defaultValueDate="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="cancelled_at" type="TIMESTAMP"/>
+
+        </createTable>
+
+        <addForeignKeyConstraint
+                baseTableName="reservations"
+                baseColumnNames="show_id"
+                referencedTableName="shows"
+                referencedColumnNames="id"
+                constraintName="fk_reservations_show"/>
+
+    </changeSet>
+
+
+    <changeSet id="002-create-reservation-seats" author="dhruvin">
+
+        <createTable tableName="reservation_seats">
+
+            <column name="reservation_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="show_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="seat_number" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+        <addPrimaryKey
+                tableName="reservation_seats"
+                columnNames="reservation_id, seat_number"
+                constraintName="pk_reservation_seats"/>
+
+        <addForeignKeyConstraint
+                baseTableName="reservation_seats"
+                baseColumnNames="reservation_id"
+                referencedTableName="reservations"
+                referencedColumnNames="id"
+                constraintName="fk_reservation_seats_reservation"/>
+
+        <addForeignKeyConstraint
+                baseTableName="reservation_seats"
+                baseColumnNames="show_id, seat_number"
+                referencedTableName="seats"
+                referencedColumnNames="show_id, seat_number"
+                constraintName="fk_reservation_seats_seat"/>
+
+    </changeSet>
+
+
+    <changeSet id="002-create-show-users" author="dhruvin">
+
+        <createTable tableName="show_users">
+
+            <column name="show_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="user_id" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="seat_count" type="INT">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+        <addPrimaryKey
+                tableName="show_users"
+                columnNames="show_id, user_id"
+                constraintName="pk_show_users"/>
+
+        <addForeignKeyConstraint
+                baseTableName="show_users"
+                baseColumnNames="show_id"
+                referencedTableName="shows"
+                referencedColumnNames="id"
+                constraintName="fk_show_users_show"/>
+
+    </changeSet>
+
+
+    <changeSet id="002-create-idempotency-keys" author="dhruvin">
+
+        <createTable tableName="idempotency_keys">
+
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true"
+                             nullable="false"/>
+            </column>
+
+            <column name="show_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="user_id" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="idempotency_key" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="request_hash" type="VARCHAR(64)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="reservation_id" type="BIGINT"/>
+
+            <column name="created_at" type="TIMESTAMP"
+                    defaultValueDate="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+        <addUniqueConstraint
+                tableName="idempotency_keys"
+                columnNames="show_id, user_id, idempotency_key"
+                constraintName="uk_idempotency_scope"/>
+
+        <addForeignKeyConstraint
+                baseTableName="idempotency_keys"
+                baseColumnNames="show_id"
+                referencedTableName="shows"
+                referencedColumnNames="id"
+                constraintName="fk_idempotency_show"/>
+
+        <addForeignKeyConstraint
+                baseTableName="idempotency_keys"
+                baseColumnNames="reservation_id"
+                referencedTableName="reservations"
+                referencedColumnNames="id"
+                constraintName="fk_idempotency_reservation"/>
+
+    </changeSet>
+
+</databaseChangeLog>
