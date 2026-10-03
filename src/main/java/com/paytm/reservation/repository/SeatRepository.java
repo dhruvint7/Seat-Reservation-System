@@ -25,4 +25,16 @@ public interface SeatRepository extends JpaRepository<Seat, SeatId> {
     );
 
     List<Seat> findByShowIdOrderBySeatNumber(Long showId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT s
+        FROM Seat s
+        WHERE s.showId = :showId
+          AND s.reservationId = :reservationId
+        ORDER BY s.seatNumber
+        """)
+    List<Seat> findSeatsForReservationForUpdate(
+            @Param("showId") Long showId,
+            @Param("reservationId") Long reservationId
+    );
 }

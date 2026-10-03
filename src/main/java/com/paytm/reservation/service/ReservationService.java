@@ -339,4 +339,92 @@ public class ReservationService {
             );
         }
     }
+    @Transactional
+    public ReserveResponse cancel(
+            Long reservationId,
+            String userId
+    ) {
+        Reservation reservation =
+                reservationRepository.findForUpdate(reservationId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Reservation not found: " + reservationId
+                                )
+                        );
+
+        // Only the owner can cancel
+        if (!reservation.getUserId().equals(userId)) {
+            throw new ReservationConflictException(
+                    "You are not allowed to cancel this reservation"
+            );
+        }
+
+        List<ReservationSeat> reservationSeats =
+                reservationSeatRepository
+                        .findByReservationIdOrderBySeatNumber(
+                                reservationId
+                        );
+
+        // Make cancellation idempotent
+        if ("CANCELLED".equals(reservation.getStatus())) {
+            return toResponse(
+                    reservation,
+                    reservationSeats.stream()
+                            .map(ReservationSeat::getSeatNumber)
+                            .toList()
+            );
+        }
+
+        List<Seat> seats =
+                seatRepository.findSeatsForReservationForUpdate(
+                        reservation.getShowId(),
+                        reservationId
+                );
+
+        if (seats.size() != reservationSeats.size()) {
+            throw new IllegalStateException(
+                    "Reservation seat data is inconsistent"
+            );
+        }
+
+        ShowUser showUser =
+                showUserRepository.findForUpdate(
+                        reservation.getShowId(),
+                        userId
+                ).orElseThrow(() ->
+                        new IllegalStateException(
+                                "User reservation counter not found"
+                        )
+                );
+
+        // Release seats
+        for (Seat seat : seats) {
+            seat.setStatus("AVAILABLE");
+            seat.setReservationId(null);
+        }
+
+        seatRepository.saveAll(seats);
+
+        // Release user's quota
+        showUser.setSeatCount(
+                showUser.getSeatCount() - seats.size()
+        );
+
+        showUserRepository.save(showUser);
+
+        // Mark reservation cancelled
+        reservation.setStatus("CANCELLED");
+        reservation.setCancelledAt(
+                java.time.LocalDateTime.now()
+        );
+
+        reservationRepository.save(reservation);
+
+        return toResponse(
+                reservation,
+                reservationSeats.stream()
+                        .map(ReservationSeat::getSeatNumber)
+                        .toList()
+        );
+    }
 }
