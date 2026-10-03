@@ -3,6 +3,7 @@ package com.paytm.reservation.service;
 import com.paytm.reservation.dto.ReserveRequest;
 import com.paytm.reservation.dto.ReserveResponse;
 import com.paytm.reservation.exception.ReservationConflictException;
+import com.paytm.reservation.exception.ResourceNotFoundException;
 import com.paytm.reservation.model.IdempotencyKey;
 import com.paytm.reservation.model.Reservation;
 import com.paytm.reservation.model.ReservationSeat;
@@ -347,10 +348,8 @@ public class ReservationService {
         Reservation reservation =
                 reservationRepository.findForUpdate(reservationId)
                         .orElseThrow(() ->
-                                new IllegalArgumentException(
-                                        "Reservation not found: " + reservationId
-                                )
-                        );
+                                new ResourceNotFoundException(
+                                        "Reservation not found: " + reservationId));
 
         // Only the owner can cancel
         if (!reservation.getUserId().equals(userId)) {

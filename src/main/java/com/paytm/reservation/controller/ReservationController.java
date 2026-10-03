@@ -9,7 +9,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/shows")
 public class ReservationController {
 
     private final ReservationService reservationService;
@@ -18,7 +17,7 @@ public class ReservationController {
         this.reservationService = reservationService;
     }
 
-    @PostMapping("/{showId}/reserve")
+    @PostMapping("/shows/{showId}/reserve")
     @ResponseStatus(HttpStatus.CREATED)
     public ReserveResponse reserve(
             @PathVariable Long showId,

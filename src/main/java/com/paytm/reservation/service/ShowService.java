@@ -2,6 +2,7 @@ package com.paytm.reservation.service;
 import com.paytm.reservation.dto.CreateShowRequest;
 import com.paytm.reservation.dto.CreateShowResponse;
 import com.paytm.reservation.dto.ShowDetailsResponse;
+import com.paytm.reservation.exception.ResourceNotFoundException;
 import com.paytm.reservation.model.Seat;
 import com.paytm.reservation.model.Show;
 import com.paytm.reservation.repository.SeatRepository;
@@ -74,9 +75,7 @@ public class ShowService {
 
         Show show = showRepository.findById(showId)
                 .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Show not found: " + showId
-                        ));
+                        new ResourceNotFoundException("Show not found: " + showId));
 
         List<Seat> seats =
                 seatRepository.findByShowIdOrderBySeatNumber(showId);

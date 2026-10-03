@@ -29,4 +29,13 @@ public class GlobalExceptionHandler {
                 "message", exception.getMessage()
         );
     }
+    @ExceptionHandler(ResourceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Map<String, String> handleNotFound(
+            ResourceNotFoundException exception) {
+
+        return Map.of(
+                "error", "NOT_FOUND",
+                "message", exception.getMessage());
+    }
 }
