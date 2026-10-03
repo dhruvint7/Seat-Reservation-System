@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="
+            http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="001-create-shows" author="dhruvin">
+
+        <createTable tableName="shows">
+
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true"
+                             nullable="false"/>
+            </column>
+
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="price_paise" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="per_user_limit" type="INT" defaultValueNumeric="4">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at" type="TIMESTAMP"
+                    defaultValueDate="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+    </changeSet>
+
+
+    <changeSet id="002-create-seats" author="dhruvin">
+
+        <createTable tableName="seats">
+
+            <column name="show_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="seat_number" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="status" type="VARCHAR(20)"
+                    defaultValue="AVAILABLE">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="reservation_id" type="BIGINT"/>
+
+            <column name="updated_at" type="TIMESTAMP"
+                    defaultValueDate="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+        <addPrimaryKey
+                tableName="seats"
+                columnNames="show_id, seat_number"
+                constraintName="pk_seats"/>
+
+        <addForeignKeyConstraint
+                baseTableName="seats"
+                baseColumnNames="show_id"
+                referencedTableName="shows"
+                referencedColumnNames="id"
+                constraintName="fk_seats_show"/>
+
+    </changeSet>
+
+</databaseChangeLog>
