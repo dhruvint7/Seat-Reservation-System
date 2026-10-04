@@ -17,6 +17,7 @@ import com.paytm.reservation.repository.SeatRepository;
 import com.paytm.reservation.repository.ShowRepository;
 import com.paytm.reservation.repository.ShowUserRepository;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class ReservationService {
@@ -48,6 +50,9 @@ public class ReservationService {
     private final Counter perUserLimitCounter;
     private final Counter idempotentReplayCounter;
 
+    private final AtomicLong availableSeatsGauge =
+            new AtomicLong(0);
+
     public ReservationService(
             ShowRepository showRepository,
             SeatRepository seatRepository,
@@ -64,23 +69,46 @@ public class ReservationService {
         this.showUserRepository = showUserRepository;
         this.idempotencyKeyRepository = idempotencyKeyRepository;
 
+        /*
+         * Reservation metrics.
+         */
         this.confirmedCounter = Counter.builder("reservations.confirmed")
                 .description("Number of confirmed reservations")
                 .register(meterRegistry);
 
         this.seatTakenCounter = Counter.builder("reservations.declined")
                 .tag("reason", "seat_taken")
-                .description("Reservations declined because a seat was unavailable")
+                .description(
+                        "Reservations declined because a seat was unavailable"
+                )
                 .register(meterRegistry);
 
         this.perUserLimitCounter = Counter.builder("reservations.declined")
                 .tag("reason", "per_user_limit")
-                .description("Reservations declined because the user limit was exceeded")
+                .description(
+                        "Reservations declined because the user limit was exceeded"
+                )
                 .register(meterRegistry);
 
         this.idempotentReplayCounter = Counter.builder("reservations.declined")
                 .tag("reason", "idempotent_replay")
-                .description("Reservation requests served by idempotent replay")
+                .description(
+                        "Reservation requests served by idempotent replay"
+                )
+                .register(meterRegistry);
+
+        /*
+         * Current number of available seats.
+         *
+         * Micrometer converts reservations.seats.available
+         * into reservations_seats_available in Prometheus.
+         */
+        Gauge.builder(
+                        "reservations.seats.available",
+                        availableSeatsGauge,
+                        AtomicLong::get
+                )
+                .description("Number of currently available seats")
                 .register(meterRegistry);
     }
 
@@ -99,7 +127,9 @@ public class ReservationService {
                 .toList();
 
         if (requestedSeats.isEmpty()) {
-            throw new IllegalArgumentException("At least one seat is required");
+            throw new IllegalArgumentException(
+                    "At least one seat is required"
+            );
         }
 
         log.info(
@@ -129,15 +159,17 @@ public class ReservationService {
          * Check idempotency key.
          */
         var existingIdempotencyKey =
-                idempotencyKeyRepository.findByShowIdAndUserIdAndIdempotencyKey(
-                        showId,
-                        userId,
-                        request.idempotency_key()
-                );
+                idempotencyKeyRepository
+                        .findByShowIdAndUserIdAndIdempotencyKey(
+                                showId,
+                                userId,
+                                request.idempotency_key()
+                        );
 
         if (existingIdempotencyKey.isPresent()) {
 
-            IdempotencyKey existing = existingIdempotencyKey.get();
+            IdempotencyKey existing =
+                    existingIdempotencyKey.get();
 
             /*
              * Same key + different request body.
@@ -176,12 +208,13 @@ public class ReservationService {
             }
 
             Reservation originalReservation =
-                    reservationRepository.findById(existing.getReservationId())
-                            .orElseThrow(() ->
-                                    new IllegalStateException(
-                                            "Original reservation not found"
-                                    )
-                            );
+                    reservationRepository.findById(
+                            existing.getReservationId()
+                    ).orElseThrow(() ->
+                            new IllegalStateException(
+                                    "Original reservation not found"
+                            )
+                    );
 
             idempotentReplayCounter.increment();
 
@@ -200,28 +233,27 @@ public class ReservationService {
         }
 
         /*
-         * Find or create per-user counter row.
+         * Atomically create the per-user counter row if it does not exist.
+         *
+         * This avoids the race where multiple concurrent requests
+         * all see that the row does not exist and try to insert it.
          */
-        ShowUser showUser = showUserRepository
-                .findById(
-                        new com.paytm.reservation.model.ShowUserId(
-                                showId,
-                                userId
-                        )
-                )
-                .orElseGet(() -> {
-                    ShowUser newShowUser =
-                            new ShowUser(showId, userId);
-
-                    return showUserRepository.saveAndFlush(newShowUser);
-                });
+        showUserRepository.ensureRow(
+                showId,
+                userId
+        );
 
         /*
          * Lock user quota row.
+         *
+         * This serializes concurrent reservations from the
+         * same user for the same show.
          */
-        showUser = showUserRepository
-                .findForUpdate(showId, userId)
-                .orElseThrow(() ->
+        ShowUser showUser =
+                showUserRepository.findForUpdate(
+                        showId,
+                        userId
+                ).orElseThrow(() ->
                         new IllegalStateException(
                                 "Unable to lock user reservation counter"
                         )
@@ -233,7 +265,8 @@ public class ReservationService {
         int requestedCount = requestedSeats.size();
         int currentCount = showUser.getSeatCount();
 
-        if (currentCount + requestedCount > show.getPerUserLimit()) {
+        if (currentCount + requestedCount >
+                show.getPerUserLimit()) {
 
             perUserLimitCounter.increment();
 
@@ -258,10 +291,11 @@ public class ReservationService {
          * requestedSeats is sorted, so concurrent transactions
          * acquire multiple seat locks in deterministic order.
          */
-        List<Seat> seats = seatRepository.findSeatsForUpdate(
-                showId,
-                requestedSeats
-        );
+        List<Seat> seats =
+                seatRepository.findSeatsForUpdate(
+                        showId,
+                        requestedSeats
+                );
 
         /*
          * Make sure every requested seat exists.
@@ -315,32 +349,38 @@ public class ReservationService {
         /*
          * Create reservation.
          */
-        Reservation reservation = new Reservation(
-                showId,
-                userId,
-                amountPaise,
-                "CONFIRMED"
-        );
+        Reservation reservation =
+                new Reservation(
+                        showId,
+                        userId,
+                        amountPaise,
+                        "CONFIRMED"
+                );
 
-        reservation = reservationRepository.save(reservation);
+        reservation =
+                reservationRepository.save(reservation);
 
-        final Long reservationId = reservation.getId();
+        final Long reservationId =
+                reservation.getId();
 
         /*
          * Create reservation-seat mappings.
          */
-        List<ReservationSeat> reservationSeats = requestedSeats
-                .stream()
-                .map(seatNumber ->
-                        new ReservationSeat(
-                                reservationId,
-                                showId,
-                                seatNumber
+        List<ReservationSeat> reservationSeats =
+                requestedSeats
+                        .stream()
+                        .map(seatNumber ->
+                                new ReservationSeat(
+                                        reservationId,
+                                        showId,
+                                        seatNumber
+                                )
                         )
-                )
-                .toList();
+                        .toList();
 
-        reservationSeatRepository.saveAll(reservationSeats);
+        reservationSeatRepository.saveAll(
+                reservationSeats
+        );
 
         /*
          * Mark seats confirmed.
@@ -364,18 +404,28 @@ public class ReservationService {
         /*
          * Store idempotency mapping.
          */
-        IdempotencyKey idempotencyKey = new IdempotencyKey(
-                showId,
-                userId,
-                request.idempotency_key(),
-                requestHash
+        IdempotencyKey idempotencyKey =
+                new IdempotencyKey(
+                        showId,
+                        userId,
+                        request.idempotency_key(),
+                        requestHash
+                );
+
+        idempotencyKey.setReservationId(
+                reservationId
         );
 
-        idempotencyKey.setReservationId(reservationId);
-
-        idempotencyKeyRepository.save(idempotencyKey);
+        idempotencyKeyRepository.save(
+                idempotencyKey
+        );
 
         confirmedCounter.increment();
+
+        /*
+         * Refresh available-seat gauge.
+         */
+        refreshAvailableSeatsGauge();
 
         log.info(
                 "Reservation confirmed: reservationId={}, showId={}, userId={}, " +
@@ -407,7 +457,9 @@ public class ReservationService {
         );
     }
 
-    private String hashSeats(List<String> seats) {
+    private String hashSeats(
+            List<String> seats
+    ) {
 
         String canonicalValue =
                 String.join(",", seats);
@@ -416,18 +468,29 @@ public class ReservationService {
             MessageDigest digest =
                     MessageDigest.getInstance("SHA-256");
 
-            byte[] hash = digest.digest(
-                    canonicalValue.getBytes(StandardCharsets.UTF_8)
-            );
+            byte[] hash =
+                    digest.digest(
+                            canonicalValue.getBytes(
+                                    StandardCharsets.UTF_8
+                            )
+                    );
 
             return HexFormat.of().formatHex(hash);
 
         } catch (NoSuchAlgorithmException exception) {
+
             throw new IllegalStateException(
                     "SHA-256 algorithm is not available",
                     exception
             );
         }
+    }
+
+    private void refreshAvailableSeatsGauge() {
+
+        availableSeatsGauge.set(
+                seatRepository.countAvailableSeats()
+        );
     }
 
     @Transactional
@@ -442,13 +505,21 @@ public class ReservationService {
                 userId
         );
 
+        /*
+         * First lock the reservation.
+         *
+         * This serializes concurrent cancellation requests
+         * for the same reservation.
+         */
         Reservation reservation =
-                reservationRepository.findForUpdate(reservationId)
-                        .orElseThrow(() ->
-                                new ResourceNotFoundException(
-                                        "Reservation not found: " + reservationId
-                                )
-                        );
+                reservationRepository.findForUpdate(
+                        reservationId
+                ).orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Reservation not found: " +
+                                        reservationId
+                        )
+                );
 
         /*
          * Only owner can cancel.
@@ -476,7 +547,8 @@ public class ReservationService {
         /*
          * Cancellation is idempotent.
          */
-        if ("CANCELLED".equals(reservation.getStatus())) {
+        if ("CANCELLED".equals(
+                reservation.getStatus())) {
 
             log.info(
                     "Cancellation replay: reservationId={}, userId={}",
@@ -487,28 +559,23 @@ public class ReservationService {
             return toResponse(
                     reservation,
                     reservationSeats.stream()
-                            .map(ReservationSeat::getSeatNumber)
+                            .map(
+                                    ReservationSeat::getSeatNumber
+                            )
                             .toList()
             );
         }
 
         /*
-         * Lock seats belonging to reservation.
-         */
-        List<Seat> seats =
-                seatRepository.findSeatsForReservationForUpdate(
-                        reservation.getShowId(),
-                        reservationId
-                );
-
-        if (seats.size() != reservationSeats.size()) {
-            throw new IllegalStateException(
-                    "Reservation seat data is inconsistent"
-            );
-        }
-
-        /*
-         * Lock user's quota row.
+         * Lock the user's quota row BEFORE locking seats.
+         *
+         * Reservation flow uses:
+         *      showUser -> seats
+         *
+         * Cancellation therefore uses the same ordering:
+         *      showUser -> seats
+         *
+         * This avoids a reserve/cancel lock-order deadlock.
          */
         ShowUser showUser =
                 showUserRepository.findForUpdate(
@@ -519,6 +586,24 @@ public class ReservationService {
                                 "User reservation counter not found"
                         )
                 );
+
+        /*
+         * Lock seats belonging to reservation.
+         */
+        List<Seat> seats =
+                seatRepository
+                        .findSeatsForReservationForUpdate(
+                                reservation.getShowId(),
+                                reservationId
+                        );
+
+        if (seats.size() !=
+                reservationSeats.size()) {
+
+            throw new IllegalStateException(
+                    "Reservation seat data is inconsistent"
+            );
+        }
 
         /*
          * Release seats.
@@ -534,20 +619,33 @@ public class ReservationService {
          * Release user's quota.
          */
         showUser.setSeatCount(
-                showUser.getSeatCount() - seats.size()
+                showUser.getSeatCount() -
+                        seats.size()
         );
 
-        showUserRepository.save(showUser);
+        showUserRepository.save(
+                showUser
+        );
 
         /*
          * Mark reservation cancelled.
          */
-        reservation.setStatus("CANCELLED");
+        reservation.setStatus(
+                "CANCELLED"
+        );
+
         reservation.setCancelledAt(
                 LocalDateTime.now()
         );
 
-        reservationRepository.save(reservation);
+        reservationRepository.save(
+                reservation
+        );
+
+        /*
+         * Refresh available-seat gauge.
+         */
+        refreshAvailableSeatsGauge();
 
         log.info(
                 "Reservation cancelled: reservationId={}, showId={}, userId={}, seats={}",
@@ -555,14 +653,18 @@ public class ReservationService {
                 reservation.getShowId(),
                 userId,
                 reservationSeats.stream()
-                        .map(ReservationSeat::getSeatNumber)
+                        .map(
+                                ReservationSeat::getSeatNumber
+                        )
                         .toList()
         );
 
         return toResponse(
                 reservation,
                 reservationSeats.stream()
-                        .map(ReservationSeat::getSeatNumber)
+                        .map(
+                                ReservationSeat::getSeatNumber
+                        )
                         .toList()
         );
     }
