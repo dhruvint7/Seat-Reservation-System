@@ -21,6 +21,8 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId}] %logger{36} - %msg%n"
 app:
+  auth:
+    token-endpoint-enabled: ${TOKEN_ENDPOINT_ENABLED:false}
   jwt:
     secret: ${JWT_SECRET:change-this-secret-key-for-local-dev-only}
     expiration-ms: 3600000
